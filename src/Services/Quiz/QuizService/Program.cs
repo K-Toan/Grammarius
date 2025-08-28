@@ -1,41 +1,74 @@
-var builder = WebApplication.CreateBuilder(args);
+using System.Text;
+using System.Text.Json;
+using GeminiLib;
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddHttpClient();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+app.MapPost("/api/v1/quiz/generate", async (PromptRequest req, IHttpClientFactory httpClientFactory) =>
 {
-    app.MapOpenApi();
-}
+    var httpClient = httpClientFactory.CreateClient();
+    var apiKey = "key";
+    var url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
-app.UseHttpsRedirection();
+    var requestBody = new
+    {
+        contents = new[]
+        {
+            new {
+                parts = new[]
+                {
+                    new { text = req.Prompt }
+                }
+            }
+        }
+    };
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    var json = JsonSerializer.Serialize(requestBody);
+    var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+    httpClient.DefaultRequestHeaders.Clear();
+    httpClient.DefaultRequestHeaders.Add("X-goog-api-key", apiKey);
+
+    var response = await httpClient.PostAsync(url, content);
+    var result = await response.Content.ReadAsStringAsync();
+
+    return Results.Content(result, "application/json");
+
+    if (!response.IsSuccessStatusCode)
+        throw new HttpRequestException($"Gemini API error: {result}");
+
+    using var doc = JsonDocument.Parse(result);
+
+    var finishReason = doc.RootElement
+        .GetProperty("candidates")[0]
+        .GetProperty("finishReason")
+        .GetString();
+
+    if(finishReason != "STOP_SEQUENCE")
+        throw new Exception("The response was not completed successfully.");
+
+    var responseContent = doc.RootElement
+        .GetProperty("candidates")[0]
+        .GetProperty("content")
+        .GetProperty("parts")[0]
+        .GetProperty("text")
+        .GetString();
+
+    var responseId = doc.RootElement
+        .GetProperty("responseId")
+        .GetString();
+
+    return Results.Ok(new PromptResponse
+    {
+        ResponseContent = responseContent,
+        ResponseId = responseId,
+    });
+});
 
 app.Run();
 
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
+public record PromptRequest(string Prompt);
+public record PromptResponse(string ResponseContent, string ResponseId, string FinishReason);
