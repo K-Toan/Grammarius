@@ -1,25 +1,26 @@
 ﻿using System.Net.Http;
 using System.Text;
 using System.Text.Json;
-using System.Threading.Tasks;
+using Microsoft.Extensions.Options;
 
 namespace GeminiLib;
 
 public class GeminiClient
 {
     private readonly HttpClient _httpClient;
-    private readonly string _apiKey;
-    private readonly string _model = "gemini-2.0-flash";
+    private readonly GeminiConfig _config;
 
-    public GeminiClient(HttpClient httpClient, string apiKey)
+    public GeminiClient(HttpClient httpClient, IOptions<GeminiConfig> config)
     {
         _httpClient = httpClient;
-        _apiKey = apiKey;
+        _config = config.Value;
     }
 
     public async Task<string> GenerateAsync(string prompt)
     {
-        var url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+        var model = _config.DefaultModel;
+
+        var url = $"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent";
 
         var requestBody = new
         {
@@ -31,14 +32,15 @@ public class GeminiClient
                         new { text = prompt }
                     }
                 }
-            }
+            },
+            generationConfig = _config.Models[model]
         };
 
         var json = JsonSerializer.Serialize(requestBody);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
         _httpClient.DefaultRequestHeaders.Clear();
-        _httpClient.DefaultRequestHeaders.Add("X-goog-api-key", _apiKey);
+        _httpClient.DefaultRequestHeaders.Add("X-goog-api-key", _config.ApiKey);
 
         var response = await _httpClient.PostAsync(url, content);
         var result = await response.Content.ReadAsStringAsync();
@@ -47,7 +49,6 @@ public class GeminiClient
             throw new HttpRequestException($"Gemini API error: {result}");
 
         using var doc = JsonDocument.Parse(result);
-
         var text = doc
             .RootElement
             .GetProperty("candidates")[0]

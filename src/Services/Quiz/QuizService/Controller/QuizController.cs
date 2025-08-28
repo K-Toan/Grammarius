@@ -16,7 +16,7 @@ public class QuizController : ControllerBase
         _httpClient = httpClientFactory.CreateClient();
     }
 
-    [HttpPost("api/v1/quiz/generate")]
+    [HttpPost("/api/v1/quiz/generate")]
     public async Task<IActionResult> GenerateQuiz([FromBody] string prompt)
     {
         var url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
